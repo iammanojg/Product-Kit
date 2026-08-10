@@ -11,6 +11,10 @@ Flow:
 
 import io
 import os
+import time
+import json
+import concurrent.futures
+import urllib.request
 from PIL import Image
 import streamlit as st
 
@@ -104,14 +108,34 @@ run = st.button("Generate the kit", type="primary", use_container_width=True)
 
 
 # ---------- Background removal ----------
-def remove_background(image_bytes: bytes) -> Image.Image | None:
-    """Strip background with rembg. Fall back to original image on failure."""
+def remove_background(image_bytes: bytes, timeout_seconds: int = 60) -> Image.Image | None:
+    """Strip background with rembg but don't block longer than timeout_seconds.
+    If rembg isn't available or it times out, return the original image."""
+    img = Image.open(io.BytesIO(image_bytes))
     try:
         from rembg import remove
-        return remove(Image.open(io.BytesIO(image_bytes)))
     except Exception as e:
-        st.info(f"Background removal skipped ({type(e).__name__}). Showing original image.")
-        return Image.open(io.BytesIO(image_bytes))
+        st.info(f"rembg not available: {e}. Using original image.")
+        return img
+
+    def worker(i_bytes: bytes):
+        # This runs in a thread — keep it simple
+        return remove(Image.open(io.BytesIO(i_bytes)))
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+        fut = ex.submit(worker, image_bytes)
+        try:
+            start = time.time()
+            result = fut.result(timeout=timeout_seconds)
+            elapsed = time.time() - start
+            st.info(f"Background removed in {elapsed:.1f}s")
+            return result
+        except concurrent.futures.TimeoutError:
+            st.warning(f"Background removal timed out after {timeout_seconds}s. Showing original image.")
+            return img
+        except Exception as e:
+            st.info(f"Background removal skipped ({type(e).__name__}): {e}. Showing original image.")
+            return img
 
 
 # ---------- LLM prompt ----------
@@ -152,10 +176,7 @@ eBay rewards clarity and specificity. Return valid JSON only, no prose."""
 
 
 # ---------- Groq call ----------
-def call_groq(prompt: str, api_key: str) -> dict | None:
-    import json
-    import urllib.request
-
+def call_groq(prompt: str, api_key: str, timeout: int = 30) -> dict | None:
     payload = json.dumps({
         "model": "llama-3.3-70b-versatile",
         "messages": [{"role": "user", "content": prompt}],
@@ -172,9 +193,23 @@ def call_groq(prompt: str, api_key: str) -> dict | None:
         },
     )
     try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            body = json.loads(resp.read().decode("utf-8"))
-            return json.loads(body["choices"][0]["message"]["content"])
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            raw = resp.read().decode("utf-8")
+            st.info(f"Groq raw response length: {len(raw)}")
+            body = json.loads(raw)
+            # Be resilient: content may already be parsed or may be a JSON string
+            content = body["choices"][0]["message"].get("content")
+            if isinstance(content, str):
+                try:
+                    return json.loads(content)
+                except json.JSONDecodeError:
+                    st.error("Groq returned invalid JSON content.")
+                    return None
+            elif isinstance(content, dict):
+                return content
+            else:
+                st.error("Unexpected Groq response format.")
+                return None
     except Exception as e:
         st.error(f"Groq request failed: {e}")
         return None
