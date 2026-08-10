@@ -47,7 +47,7 @@ with st.expander("What this is (and what it isn't)"):
         """
     )
 
-# ---------- Sidebar: API key ----------
+# ---------- Sidebar: API key + dev toggles ----------
 st.sidebar.header("Setup")
 groq_key = st.sidebar.text_input(
     "Groq API key",
@@ -58,6 +58,10 @@ groq_key = st.sidebar.text_input(
 st.sidebar.markdown(
     "[Get a free Groq key →](https://console.groq.com/keys)"
 )
+
+# Developer shortcuts (helpful for debugging in hosted environments)
+dev_skip_rembg = st.sidebar.checkbox("Dev: skip rembg (use original image)", value=False)
+dev_use_mock = st.sidebar.checkbox("Dev: use mock kit (skip Groq)", value=False)
 
 # ---------- Inputs ----------
 col_input_left, col_input_right = st.columns([1, 1])
@@ -299,14 +303,49 @@ if run:
         st.warning("Upload a product photo first.")
     elif not product_name:
         st.warning("Add the product name.")
-    elif not groq_key:
-        st.warning("Add your free Groq API key in the sidebar.")
+    elif not groq_key and not dev_use_mock:
+        st.warning("Add your free Groq API key in the sidebar or enable Dev: use mock kit.")
     else:
+        # Read the uploaded file once
+        image_bytes = uploaded.read()
+
         with st.spinner("Stripping background..."):
-            clean_image = remove_background(uploaded.read())
+            if dev_skip_rembg:
+                clean_image = Image.open(io.BytesIO(image_bytes))
+                st.info("Dev: skipped rembg and used original image")
+            else:
+                clean_image = remove_background(image_bytes)
+
         with st.spinner("Generating the kit..."):
-            prompt = build_prompt(product_name, product_category, target_marketplace, psychology)
-            kit = call_groq(prompt, groq_key)
+            if dev_use_mock:
+                st.info("Dev: using mock kit (no Groq call)")
+                kit = {
+                    "marketplace_copy": {
+                        "amazon": {"title": "Test title — Handmade ceramic espresso cup", "bullets": [
+                            "High-quality ceramic",
+                            "Dishwasher safe",
+                            "Perfect for espresso shots",
+                            "Handmade — each is unique",
+                            "Fast shipping"
+                        ], "description": "A handcrafted ceramic espresso cup with a smooth glaze. Comfortable handle and durable finish."},
+                        "shopify": {"title": "Handmade ceramic espresso cup — cozy mornings", "description": "Quality ceramic cup for espresso lovers. Ideal for cafes and home use."},
+                        "etsy": None,
+                        "ebay": None
+                    },
+                    "photoroom_recipe": {
+                        "scene_1": "Studio white background, soft shadow, crop tight to product",
+                        "scene_2": "Lifestyle — hand holding cup, warm tones",
+                        "scene_3": "Flat-lay on wooden table, natural overhead light"
+                    },
+                    "captions": {
+                        "fomo": "Last chance — limited stock! Grab yours today.",
+                        "jomo": "Savour slow mornings with this handmade espresso cup."
+                    }
+                }
+            else:
+                prompt = build_prompt(product_name, product_category, target_marketplace, psychology)
+                kit = call_groq(prompt, groq_key)
+
         if kit and clean_image:
             render_kit(clean_image, kit, target_marketplace, psychology)
 
