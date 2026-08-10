@@ -1,0 +1,4 @@
+streamlit==1.39.0
+rembg==2.0.59
+onnxruntime==1.19.2
+Pillow==10.4.0
