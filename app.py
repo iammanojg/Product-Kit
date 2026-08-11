@@ -163,8 +163,8 @@ run = st.button("Generate the kit", type="primary", use_container_width=True)
 if run:
     if not groq_key:
         st.error("Please add your Groq API key.")
-    elif not uploaded:
-        st.error("Please upload a product photo.")
+    elif img is None:
+    st.error("Please upload a product photo or select a demo preset.")
     elif not product_name.strip():
         st.error("Please provide a product name.")
     else:
