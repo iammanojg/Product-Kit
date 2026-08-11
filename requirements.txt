@@ -1,4 +1,2 @@
-# Product-Kit runtime dependencies
 streamlit
-rembg[full]==2.0.78
 Pillow
