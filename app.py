@@ -164,7 +164,7 @@ if run:
     if not groq_key:
         st.error("Please add your Groq API key.")
     elif img is None:
-    st.error("Please upload a product photo or select a demo preset.")
+        st.error("Please upload a product photo or select a demo preset.")
     elif not product_name.strip():
         st.error("Please provide a product name.")
     else:
