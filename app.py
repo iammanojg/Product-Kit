@@ -1,79 +1,164 @@
 """
 Product Kit — a lightweight growth tool for SMB sellers.
 Built as a v1 proof-of-concept for the Photoroom Senior Growth Marketing application.
-
+ 
 Flow:
   1. Seller uploads a product photo and enters product name + category.
-  2. Background is removed locally with rembg (free, no API).
-  3. Groq's free LLM generates marketplace-specific copy, a Photoroom edit
-     recipe, and a FOMO/JOMO caption pair grounded in behavioural science.
+  2. Groq analyses the image description and generates:
+     - A visual diagnosis of the current photo
+     - A styled art-direction brief (before → after)
+     - Marketplace-specific copy for selected platforms
+     - FOMO vs JOMO caption pair grounded in behavioural science
 """
-
+ 
 import io
 import os
-import time
 import json
-import concurrent.futures
+import base64
 import urllib.request
 from PIL import Image
 import streamlit as st
-
-# ---------- Page setup ----------
+ 
+# ---------- Page config ----------
 st.set_page_config(
     page_title="Product Kit — for SMB sellers",
     page_icon="🛍️",
     layout="wide",
 )
-
+ 
+# ---------- Custom CSS ----------
+st.markdown("""
+<style>
+.diagnosis-box {
+    background: #1a1a2e;
+    border-left: 4px solid #e74c3c;
+    border-radius: 6px;
+    padding: 16px 20px;
+    margin-bottom: 12px;
+}
+.brief-box {
+    background: #0f3460;
+    border-left: 4px solid #00d4aa;
+    border-radius: 6px;
+    padding: 16px 20px;
+    margin-bottom: 12px;
+}
+.scene-card {
+    background: #16213e;
+    border: 1px solid #00d4aa33;
+    border-radius: 8px;
+    padding: 14px 18px;
+    margin-bottom: 10px;
+}
+.scene-number {
+    color: #00d4aa;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    margin-bottom: 4px;
+}
+.scene-text {
+    color: #e8e8e8;
+    font-size: 15px;
+    line-height: 1.5;
+}
+.label-pill {
+    display: inline-block;
+    background: #e74c3c22;
+    color: #e74c3c;
+    border: 1px solid #e74c3c44;
+    border-radius: 20px;
+    padding: 2px 10px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    margin-bottom: 8px;
+}
+.label-pill-green {
+    display: inline-block;
+    background: #00d4aa22;
+    color: #00d4aa;
+    border: 1px solid #00d4aa44;
+    border-radius: 20px;
+    padding: 2px 10px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    margin-bottom: 8px;
+}
+.fomo-box {
+    background: #2d1b1b;
+    border: 1px solid #e74c3c55;
+    border-radius: 8px;
+    padding: 16px;
+    color: #f0a0a0;
+    font-size: 15px;
+    line-height: 1.6;
+}
+.jomo-box {
+    background: #1b2d2b;
+    border: 1px solid #00d4aa55;
+    border-radius: 8px;
+    padding: 16px;
+    color: #a0f0e0;
+    font-size: 15px;
+    line-height: 1.6;
+}
+</style>
+""", unsafe_allow_html=True)
+ 
+# ---------- Header ----------
 st.title("Product Kit")
 st.caption(
-    "Turn a product photo into a marketplace-ready kit. "
-    "Background stripped, copy generated, edit recipe handed off to Photoroom."
+    "Upload a product photo → get a visual diagnosis, a Photoroom art-direction brief, "
+    "marketplace copy, and a FOMO/JOMO caption pair. Built for SMB sellers."
 )
-
+ 
 with st.expander("What this is (and what it isn't)"):
-    st.markdown(
-        """
-        **v1 proof-of-concept**, built in an afternoon to test one hypothesis:
-        SMB sellers need raw marketing materials fast, not finished graphics.
-
-        This tool produces the **raw materials** — clean cutout, platform-specific
-        copy, and a hand-off recipe telling the seller exactly what to do next
-        inside Photoroom. It does not compete with Photoroom; it feeds it.
-
-        **Roadmap (v2):** programmatic category landing pages, product-URL
-        scraping, live A/B tests on caption variants, referral loop back to
-        Photoroom sign-up.
-        """
+    st.markdown("""
+**v1 proof-of-concept.** Built to test one hypothesis: SMB sellers don't need another image editor —
+they need a creative director who tells them exactly what to fix and how.
+ 
+This tool produces:
+- A **visual diagnosis** of what's holding back the current photo
+- A **Photoroom art-direction brief** — three scenes, ready to paste into Photoroom's AI backdrop
+- **Platform-specific copy** tuned for Amazon, Shopify, Etsy, or eBay
+- A **FOMO vs JOMO caption pair** — two behavioural framings, A/B ready
+ 
+It doesn't compete with Photoroom. It tells the seller what to do *inside* Photoroom.
+ 
+**Roadmap (v2):** Background removal, programmatic SEO pages by product category,
+product-URL scraping, live caption A/B tracking, direct Photoroom CTA integration.
+    """)
+ 
+# ---------- API key ----------
+groq_key = os.getenv("GROQ_API_KEY", "")
+if not groq_key:
+    st.sidebar.header("Setup")
+    groq_key = st.sidebar.text_input(
+        "Groq API key",
+        type="password",
+        help="Free key from console.groq.com — no card required.",
     )
-
-# ---------- Sidebar: API key + dev toggles ----------
-st.sidebar.header("Setup")
-groq_key = st.sidebar.text_input(
-    "Groq API key",
-    type="password",
-    help="Free key from console.groq.com. Not stored anywhere.",
-    value=os.getenv("GROQ_API_KEY", ""),
-)
-st.sidebar.markdown(
-    "[Get a free Groq key →](https://console.groq.com/keys)"
-)
-
-# Developer shortcuts (helpful for debugging in hosted environments)
-dev_skip_rembg = st.sidebar.checkbox("Dev: skip rembg (use original image)", value=False)
-dev_use_mock = st.sidebar.checkbox("Dev: use mock kit (skip Groq)", value=False)
-
+    st.sidebar.markdown("[Get a free Groq key →](https://console.groq.com/keys)")
+else:
+    st.sidebar.success("✓ API key loaded")
+ 
 # ---------- Inputs ----------
-col_input_left, col_input_right = st.columns([1, 1])
-
-with col_input_left:
+col_left, col_right = st.columns([1, 1])
+ 
+with col_left:
     st.subheader("1. Upload the product photo")
-    uploaded = st.file_uploader(
-        "PNG or JPG, ideally on a plain background",
-        type=["png", "jpg", "jpeg"],
-    )
-
-with col_input_right:
+    uploaded = st.file_uploader("PNG or JPG", type=["png", "jpg", "jpeg"])
+    if uploaded:
+        img = Image.open(uploaded)
+        st.image(img, use_container_width=True)
+        st.caption("← This is what we're diagnosing")
+ 
+with col_right:
     st.subheader("2. Tell us about the product")
     product_name = st.text_input(
         "Product name",
@@ -81,17 +166,9 @@ with col_input_right:
     )
     product_category = st.selectbox(
         "Category",
-        [
-            "Home & kitchen",
-            "Fashion & accessories",
-            "Beauty & personal care",
-            "Electronics & gadgets",
-            "Handmade & craft",
-            "Fitness & outdoors",
-            "Pet supplies",
-            "Baby & kids",
-            "Other",
-        ],
+        ["Home & kitchen", "Fashion & accessories", "Beauty & personal care",
+         "Electronics & gadgets", "Handmade & craft", "Fitness & outdoors",
+         "Pet supplies", "Baby & kids", "Other"],
     )
     target_marketplace = st.multiselect(
         "Where will you sell it?",
@@ -102,92 +179,101 @@ with col_input_right:
         "Caption angle",
         ["Compare both (FOMO vs JOMO)", "FOMO only", "JOMO only"],
         help=(
-            "Behavioural framing. FOMO uses scarcity and urgency; "
-            "JOMO uses calm and intentionality. Based on consumer-behaviour "
-            "research on message type and purchase intent."
+            "FOMO: scarcity and urgency. JOMO: calm intentionality. "
+            "Based on consumer-behaviour research on message type and purchase intent."
         ),
     )
-
+ 
 run = st.button("Generate the kit", type="primary", use_container_width=True)
-
-
-# ---------- Background removal ----------
-def remove_background(image_bytes: bytes, timeout_seconds: int = 60) -> Image.Image | None:
-    """Strip background with rembg but don't block longer than timeout_seconds.
-    If rembg isn't available or it times out, return the original image."""
-    img = Image.open(io.BytesIO(image_bytes))
-    try:
-        from rembg import remove
-    except Exception as e:
-        st.info(f"rembg not available: {e}. Using original image.")
-        return img
-
-    def worker(i_bytes: bytes):
-        # This runs in a thread — keep it simple
-        return remove(Image.open(io.BytesIO(i_bytes)))
-
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
-        fut = ex.submit(worker, image_bytes)
-        try:
-            start = time.time()
-            result = fut.result(timeout=timeout_seconds)
-            elapsed = time.time() - start
-            st.info(f"Background removed in {elapsed:.1f}s")
-            return result
-        except concurrent.futures.TimeoutError:
-            st.warning(f"Background removal timed out after {timeout_seconds}s. Showing original image.")
-            return img
-        except Exception as e:
-            st.info(f"Background removal skipped ({type(e).__name__}): {e}. Showing original image.")
-            return img
-
-
-# ---------- LLM prompt ----------
-def build_prompt(name: str, category: str, marketplaces: list[str], psych: str) -> str:
-    return f"""You are a senior growth marketer for SMB e-commerce sellers.
-
-A seller has uploaded a product photo. Here are the details:
-
-- Product name: {name}
+ 
+ 
+# ---------- Encode image for LLM ----------
+def encode_image(image: Image.Image) -> str:
+    """Resize and base64-encode image for Groq vision."""
+    img = image.copy()
+    img.thumbnail((800, 800))
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=85)
+    return base64.b64encode(buf.getvalue()).decode("utf-8")
+ 
+ 
+# ---------- Build prompt ----------
+def build_prompt(name: str, category: str, marketplaces: list, psych: str) -> str:
+    mkt = ", ".join(marketplaces) if marketplaces else "Amazon, Shopify"
+    return f"""You are a senior e-commerce visual strategist and growth marketer.
+ 
+A seller has uploaded a product photo. Their product details:
+- Name: {name}
 - Category: {category}
-- Target marketplaces: {", ".join(marketplaces) if marketplaces else "Amazon, Shopify"}
-- Caption angle: {psych}
-
-Return a single JSON object with these exact keys:
-
+- Target marketplaces: {mkt}
+- Caption angle requested: {psych}
+ 
+Look at the image carefully. Then return a single JSON object with these exact keys:
+ 
 {{
-  "marketplace_copy": {{
-    "amazon": {{ "title": "...", "bullets": ["...", "...", "...", "...", "..."], "description": "..." }},
-    "shopify": {{ "title": "...", "description": "..." }},
-    "etsy": {{ "title": "...", "story": "..." }},
-    "ebay": {{ "title": "...", "description": "..." }}
+  "diagnosis": {{
+    "score": "A number from 1-10 rating the current photo for marketplace conversion",
+    "issues": ["Issue 1 in one sharp sentence", "Issue 2", "Issue 3"],
+    "what_is_working": "One sentence on what the photo does well, if anything"
   }},
-  "photoroom_recipe": {{
-    "scene_1": "One-line edit recipe: background, lighting, crop, use-case",
-    "scene_2": "One-line edit recipe: different context",
-    "scene_3": "One-line edit recipe: different context"
+  "photoroom_brief": {{
+    "scene_1": {{
+      "label": "Studio clean",
+      "instruction": "Specific one-line Photoroom edit instruction: background, lighting, shadow, crop ratio",
+      "why": "One sentence on why this scene converts on the target marketplace"
+    }},
+    "scene_2": {{
+      "label": "Lifestyle context",
+      "instruction": "Specific one-line instruction for a lifestyle scene relevant to this product",
+      "why": "One sentence on the buyer psychology this scene targets"
+    }},
+    "scene_3": {{
+      "label": "Detail or texture",
+      "instruction": "Specific one-line instruction for a close-up or detail shot",
+      "why": "One sentence on why detail shots reduce return rates for this category"
+    }}
+  }},
+  "marketplace_copy": {{
+    "amazon": {{ "title": "Keyword-dense title under 200 chars", "bullets": ["Benefit bullet 1", "Benefit bullet 2", "Benefit bullet 3", "Benefit bullet 4", "Benefit bullet 5"], "description": "2-3 sentence Amazon description" }},
+    "shopify": {{ "title": "Brand-voice title", "description": "2-3 sentence Shopify description with lifestyle angle" }},
+    "etsy": {{ "title": "Story-driven title", "story": "2-3 sentence Etsy description with craft and maker angle" }},
+    "ebay": {{ "title": "Clear specific title", "description": "2-3 sentence eBay description with condition and specs" }}
   }},
   "captions": {{
-    "fomo": "One social caption using scarcity and urgency. Under 40 words.",
-    "jomo": "One social caption using calm, intentional framing. Under 40 words."
+    "fomo": "Social caption using scarcity or urgency. Under 35 words. No hashtags.",
+    "jomo": "Social caption using calm intentional framing. Under 35 words. No hashtags."
   }}
 }}
-
-Only include marketplace copy for the marketplaces the seller selected;
-set the others to null. Amazon rewards keyword density in titles.
-Etsy rewards story and craft. Shopify rewards brand voice.
-eBay rewards clarity and specificity. Return valid JSON only, no prose."""
-
-
-# ---------- Groq call ----------
-def call_groq(prompt: str, api_key: str, timeout: int = 30) -> dict | None:
+ 
+Rules:
+- Only include marketplace_copy for the selected marketplaces ({mkt}); set others to null.
+- The diagnosis must be specific to what you actually see in the image — not generic.
+- The Photoroom brief instructions must be specific enough to paste directly into Photoroom.
+- Return valid JSON only. No prose, no markdown fences, no preamble."""
+ 
+ 
+# ---------- Groq call with vision ----------
+def call_groq(prompt: str, api_key: str, image_b64: str) -> dict | None:
     payload = json.dumps({
-        "model": "llama-3.3-70b-versatile",
-        "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0.7,
+        "model": "meta-llama/llama-4-scout-17b-16e-instruct",
+        "messages": [{
+            "role": "user",
+            "content": [
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"}
+                },
+                {
+                    "type": "text",
+                    "text": prompt
+                }
+            ]
+        }],
+        "temperature": 0.6,
         "response_format": {"type": "json_object"},
+        "max_tokens": 2000,
     }).encode("utf-8")
-
+ 
     req = urllib.request.Request(
         "https://api.groq.com/openai/v1/chat/completions",
         data=payload,
@@ -197,161 +283,153 @@ def call_groq(prompt: str, api_key: str, timeout: int = 30) -> dict | None:
         },
     )
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            raw = resp.read().decode("utf-8")
-            st.info(f"Groq raw response length: {len(raw)}")
-            body = json.loads(raw)
-            # Be resilient: content may already be parsed or may be a JSON string
+        with urllib.request.urlopen(req, timeout=45) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
             content = body["choices"][0]["message"].get("content")
             if isinstance(content, str):
-                try:
-                    return json.loads(content)
-                except json.JSONDecodeError:
-                    st.error("Groq returned invalid JSON content.")
-                    return None
+                # Strip accidental markdown fences
+                clean = content.strip().lstrip("```json").lstrip("```").rstrip("```").strip()
+                return json.loads(clean)
             elif isinstance(content, dict):
                 return content
             else:
-                st.error("Unexpected Groq response format.")
+                st.error("Unexpected response format from Groq.")
                 return None
-    except Exception as e:
-        st.error(f"Groq request failed: {e}")
+    except json.JSONDecodeError as e:
+        st.error(f"JSON parse error: {e}")
         return None
-
-
-# ---------- Render output ----------
-def render_kit(image: Image.Image, kit: dict, marketplaces: list[str], psych: str):
+    except Exception as e:
+        st.error(f"Generation failed: {e}")
+        return None
+ 
+ 
+# ---------- Render ----------
+def render_kit(image: Image.Image, kit: dict, marketplaces: list, psych: str):
     st.divider()
-    st.header("Your product kit")
-
-    left, right = st.columns([1, 1])
-
-    with left:
-        st.subheader("Clean cutout")
+ 
+    # ── Before → After layout ──────────────────────────────────────
+    st.header("Visual diagnosis + Photoroom brief")
+    st.caption("What's holding your photo back — and exactly what to do about it inside Photoroom.")
+ 
+    col_before, col_after = st.columns([1, 1])
+ 
+    with col_before:
+        st.markdown('<div class="label-pill">BEFORE — Current photo</div>', unsafe_allow_html=True)
         st.image(image, use_container_width=True)
-        buf = io.BytesIO()
-        image.save(buf, format="PNG")
-        st.download_button(
-            "Download cutout (PNG)",
-            data=buf.getvalue(),
-            file_name="product_cutout.png",
-            mime="image/png",
-        )
-
-    with right:
-        st.subheader("Photoroom edit recipe")
-        st.caption(
-            "Three scenes to build from this cutout inside Photoroom. "
-            "Copy a recipe, paste it into Photoroom's AI backdrop, and ship."
-        )
-        recipe = kit.get("photoroom_recipe", {})
-        for label, key in [("Scene 1", "scene_1"), ("Scene 2", "scene_2"), ("Scene 3", "scene_3")]:
-            if recipe.get(key):
-                st.markdown(f"**{label}.** {recipe[key]}")
-
+ 
+        diag = kit.get("diagnosis", {})
+        score = diag.get("score", "–")
+        st.markdown(f"**Conversion score: {score}/10**")
+ 
+        issues = diag.get("issues", [])
+        if issues:
+            st.markdown("**What to fix:**")
+            for issue in issues:
+                st.markdown(f"- {issue}")
+ 
+        working = diag.get("what_is_working", "")
+        if working:
+            st.markdown(f"**What's working:** {working}")
+ 
+    with col_after:
+        st.markdown('<div class="label-pill-green">AFTER — Photoroom brief</div>', unsafe_allow_html=True)
+        st.caption("Paste any of these directly into Photoroom's AI backdrop.")
+ 
+        brief = kit.get("photoroom_brief", {})
+        for key in ["scene_1", "scene_2", "scene_3"]:
+            scene = brief.get(key, {})
+            if scene:
+                label = scene.get("label", "")
+                instruction = scene.get("instruction", "")
+                why = scene.get("why", "")
+                st.markdown(f"""
+<div class="scene-card">
+  <div class="scene-number">{label}</div>
+  <div class="scene-text">{instruction}</div>
+  <div style="color:#888;font-size:13px;margin-top:6px;">{why}</div>
+</div>
+""", unsafe_allow_html=True)
+ 
+    # ── Marketplace copy ───────────────────────────────────────────
     st.divider()
     st.subheader("Marketplace-optimised copy")
-    st.caption("Each marketplace has a different SEO and buyer-psychology profile.")
-
-    active_tabs = [m for m in marketplaces if kit.get("marketplace_copy", {}).get(m.lower())]
-    if active_tabs:
-        tabs = st.tabs(active_tabs)
-        for tab, market in zip(tabs, active_tabs):
+    st.caption("Each platform rewards a different SEO logic and buyer psychology.")
+ 
+    active = [m for m in marketplaces if kit.get("marketplace_copy", {}).get(m.lower())]
+    if active:
+        tabs = st.tabs(active)
+        for tab, market in zip(tabs, active):
             data = kit["marketplace_copy"][market.lower()]
+            if not data:
+                continue
             with tab:
                 if market == "Amazon":
-                    st.markdown(f"**Title.** {data.get('title', '')}")
+                    st.markdown(f"**Title.**  \n{data.get('title', '')}")
                     st.markdown("**Bullets.**")
                     for b in data.get("bullets", []):
                         st.markdown(f"- {b}")
-                    st.markdown(f"**Description.** {data.get('description', '')}")
+                    st.markdown(f"**Description.**  \n{data.get('description', '')}")
                 elif market == "Etsy":
-                    st.markdown(f"**Title.** {data.get('title', '')}")
-                    st.markdown(f"**Story.** {data.get('story', '')}")
+                    st.markdown(f"**Title.**  \n{data.get('title', '')}")
+                    st.markdown(f"**Story.**  \n{data.get('story', '')}")
                 else:
-                    st.markdown(f"**Title.** {data.get('title', '')}")
-                    st.markdown(f"**Description.** {data.get('description', '')}")
-
+                    st.markdown(f"**Title.**  \n{data.get('title', '')}")
+                    st.markdown(f"**Description.**  \n{data.get('description', '')}")
+ 
+    # ── FOMO vs JOMO ──────────────────────────────────────────────
     st.divider()
     st.subheader("Caption pair — FOMO vs JOMO")
     st.caption(
-        "A/B the same product with two behavioural framings. "
-        "FOMO leans on scarcity; JOMO leans on intentionality. "
+        "Two behavioural framings of the same product. "
+        "A/B them. Keep whichever converts. "
         "Grounded in consumer-behaviour research on message type and purchase intent."
     )
+ 
     caps = kit.get("captions", {})
     c1, c2 = st.columns(2)
+ 
     if psych in ("Compare both (FOMO vs JOMO)", "FOMO only"):
         with c1:
-            st.markdown("**FOMO caption**")
-            st.info(caps.get("fomo", ""))
+            st.markdown("**FOMO**")
+            st.markdown(
+                f'<div class="fomo-box">{caps.get("fomo", "")}</div>',
+                unsafe_allow_html=True
+            )
+ 
     if psych in ("Compare both (FOMO vs JOMO)", "JOMO only"):
         with c2:
-            st.markdown("**JOMO caption**")
-            st.success(caps.get("jomo", ""))
-
+            st.markdown("**JOMO**")
+            st.markdown(
+                f'<div class="jomo-box">{caps.get("jomo", "")}</div>',
+                unsafe_allow_html=True
+            )
+ 
     st.divider()
     st.markdown(
-        "**Next step.** Take the cutout and a recipe into "
-        "[Photoroom](https://www.photoroom.com) to finish the visual."
+        "**Next step.** Copy a scene brief above → open "
+        "[Photoroom](https://www.photoroom.com) → paste into AI backdrop → done."
     )
-
-
+ 
+ 
 # ---------- Main ----------
 if run:
     if not uploaded:
         st.warning("Upload a product photo first.")
     elif not product_name:
         st.warning("Add the product name.")
-    elif not groq_key and not dev_use_mock:
-        st.warning("Add your free Groq API key in the sidebar or enable Dev: use mock kit.")
+    elif not groq_key:
+        st.warning("Add your Groq API key in the sidebar.")
     else:
-        # Read the uploaded file once
-        image_bytes = uploaded.read()
-
-        with st.spinner("Stripping background..."):
-            if dev_skip_rembg:
-                clean_image = Image.open(io.BytesIO(image_bytes))
-                st.info("Dev: skipped rembg and used original image")
-            else:
-                clean_image = remove_background(image_bytes)
-
-        with st.spinner("Generating the kit..."):
-            if dev_use_mock:
-                st.info("Dev: using mock kit (no Groq call)")
-                kit = {
-                    "marketplace_copy": {
-                        "amazon": {"title": "Test title — Handmade ceramic espresso cup", "bullets": [
-                            "High-quality ceramic",
-                            "Dishwasher safe",
-                            "Perfect for espresso shots",
-                            "Handmade — each is unique",
-                            "Fast shipping"
-                        ], "description": "A handcrafted ceramic espresso cup with a smooth glaze. Comfortable handle and durable finish."},
-                        "shopify": {"title": "Handmade ceramic espresso cup — cozy mornings", "description": "Quality ceramic cup for espresso lovers. Ideal for cafes and home use."},
-                        "etsy": None,
-                        "ebay": None
-                    },
-                    "photoroom_recipe": {
-                        "scene_1": "Studio white background, soft shadow, crop tight to product",
-                        "scene_2": "Lifestyle — hand holding cup, warm tones",
-                        "scene_3": "Flat-lay on wooden table, natural overhead light"
-                    },
-                    "captions": {
-                        "fomo": "Last chance — limited stock! Grab yours today.",
-                        "jomo": "Savour slow mornings with this handmade espresso cup."
-                    }
-                }
-            else:
-                prompt = build_prompt(product_name, product_category, target_marketplace, psychology)
-                kit = call_groq(prompt, groq_key)
-
-        if kit and clean_image:
-            render_kit(clean_image, kit, target_marketplace, psychology)
-
+        image = Image.open(uploaded)
+        with st.spinner("Analysing photo and generating kit..."):
+            image_b64 = encode_image(image)
+            prompt = build_prompt(product_name, product_category, target_marketplace, psychology)
+            kit = call_groq(prompt, groq_key, image_b64)
+        if kit:
+            render_kit(image, kit, target_marketplace, psychology)
+ 
 st.divider()
 st.caption(
-    "Built by Manoj Kumar Gunasekaran as a v1 proof-of-concept for the "
-    "Photoroom Senior Growth Marketing application. "
-    "Stack: Streamlit + rembg + Groq (Llama 3.3 70B). Zero paid APIs."
+    "Built by Manoj Kumar Gunasekaran · Photoroom Senior Growth Marketing application · "
+    "Stack: Streamlit + Groq vision (Llama 4 Scout) · Zero paid APIs."
 )
