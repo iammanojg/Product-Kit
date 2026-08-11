@@ -137,7 +137,7 @@ if run:
                     temperature=0.1
                 )
                 
-                result = json.loads(response.choices.message.content)
+                result = json.loads(response.choices[0].message.content)
                 st.success("✨ Product Growth Kit Generated Successfully!")
                 
                 # 1. Diagnosis Rendering
