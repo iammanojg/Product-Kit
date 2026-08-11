@@ -87,7 +87,7 @@ else:
     st.sidebar.success("✓ API key loaded")
  
 # ---------- Inputs ----------
-col_left, col_right = st.columns()
+col_left, col_right = st.columns(2)
  
 with col_left:
     st.subheader("1. Upload the product photo")
