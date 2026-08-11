@@ -123,7 +123,7 @@ if run:
                 prompt_text = build_prompt(product_name, product_category, target_marketplace, psychology)
                 
                 response = client.chat.completions.create(
-                    model="llama-3.2-11b-vision-preview",
+                    model="qwen/qwen3.6-27b",
                     messages=[
                         {
                             "role": "user",
