@@ -255,7 +255,7 @@ Rules:
 # ---------- Groq call with vision ----------
 def call_groq(prompt: str, api_key: str, image_b64: str) -> dict | None:
     payload = json.dumps({
-        "model": "openai/gpt-oss-120b",
+        "model": "qwen/qwen3.6-27b",
         "messages": [{
             "role": "user",
             "content": [
