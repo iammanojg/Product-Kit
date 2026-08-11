@@ -134,7 +134,8 @@ if run:
                         }
                     ],
                     response_format={"type": "json_object"},
-                    temperature=0.1
+                    temperature=0.1,
+                    max_tokens=4096
                 )
                 
                 result = json.loads(response.choices[0].message.content)
