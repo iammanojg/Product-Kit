@@ -87,21 +87,75 @@ else:
     st.sidebar.success("✓ API key loaded")
  
 # ---------- Inputs ----------
+st.subheader("💡 Demo Presets")
+preset_choice = st.radio(
+    "Test with a quick sample profile if you don't have an image ready:",
+    ["None — Upload my own photo", "Handmade Ceramic Cup", "Waffle Maker", "Air Fryer"],
+    horizontal=True
+)
+
+# Setup conditional tracking placeholders based on preset selection
+default_name = ""
+default_category = "Home & kitchen"
+preset_img_path = None
+
+if preset_choice == "Handmade Ceramic Cup":
+    default_name = "Handmade ceramic espresso cup"
+    default_category = "Handmade & craft"
+    preset_img_path = "assets/cup.jpg"
+elif preset_choice == "Waffle Maker":
+    default_name = "Classic Belgian Waffle Maker"
+    default_category = "Home & kitchen"
+    preset_img_path = "assets/waffle.jpg"
+elif preset_choice == "Air Fryer":
+    default_name = "Digital Smart Air Fryer XL"
+    default_category = "Home & kitchen"
+    preset_img_path = "assets/fryer.jpg"
+
 col_left, col_right = st.columns(2)
  
 with col_left:
-    st.subheader("1. Upload the product photo")
+    st.subheader("1. Product Photo")
     uploaded = st.file_uploader("PNG or JPG", type=["png", "jpg", "jpeg"])
+    
+    # Core Image Routing Logic: Prioritize uploaded file, fallback to preset choice
+    img = None
     if uploaded:
         img = Image.open(uploaded)
         st.image(img, use_container_width=True)
+        st.caption("← File uploaded successfully")
+    elif preset_img_path and os.path.exists(preset_img_path):
+        img = Image.open(preset_img_path)
+        st.image(img, use_container_width=True)
+        st.caption(f"← Loaded preset image from: {preset_img_path}")
  
 with col_right:
-    st.subheader("2. Tell us about the product")
-    product_name = st.text_input("Product name", placeholder="e.g. Handmade ceramic espresso cup")
-    product_category = st.selectbox("Category", ["Home & kitchen", "Fashion & accessories", "Beauty & personal care", "Electronics & gadgets", "Handmade & craft", "Other"])
-    target_marketplace = st.multiselect("Where will you sell it?", ["Amazon", "Shopify", "Etsy", "eBay"], default=["Amazon", "Shopify"])
-    psychology = st.radio("Caption angle", ["Compare both (FOMO vs JOMO)", "FOMO only", "JOMO only"])
+    st.subheader("2. Product Metadata")
+    product_name = st.text_input(
+        "Product name",
+        value=default_name,  # Dynamically fills out text input using pre-set choices
+        placeholder="e.g. Handmade ceramic espresso cup",
+    )
+    
+    category_list = ["Home & kitchen", "Fashion & accessories", "Beauty & personal care", "Electronics & gadgets", "Handmade & craft", "Other"]
+    # Safely compute the index position matching your targeted fallback category
+    default_cat_index = category_list.index(default_category) if default_category in category_list else 0
+    
+    product_category = st.selectbox(
+        "Category",
+        options=category_list,
+        index=default_cat_index  # Auto-selects targeted category element dynamically
+    )
+    
+    target_marketplace = st.multiselect(
+        "Where will you sell it?",
+        ["Amazon", "Shopify", "Etsy", "eBay"],
+        default=["Amazon", "Shopify"],
+    )
+    psychology = st.radio(
+        "Caption angle",
+        ["Compare both (FOMO vs JOMO)", "FOMO only", "JOMO only"],
+    )
  
 run = st.button("Generate the kit", type="primary", use_container_width=True)
  
